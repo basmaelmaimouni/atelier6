@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Liste des inscrits</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --card: #ffffff;
+      --text: #1f2933;
+      --muted: #6b7785;
+      --primary: #2563eb;
+      --primary-dark: #1d4ed8;
+      --border: #d5dbe3;
+      --err-bg: #fdecec;
+      --err-text: #991b1b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px 16px 48px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    .conteneur { max-width: 960px; margin: 0 auto; }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    h1 { margin: 0; font-size: 1.6rem; }
+    .compteur { color: var(--muted); font-size: .95rem; margin-top: 4px; }
+    .lien {
+      display: inline-block;
+      padding: 10px 16px;
+      background: var(--primary);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+    .lien:hover { background: var(--primary-dark); }
+
+    .grille {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .carte {
+      background: var(--card);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0, 0, 0, .07);
+      display: flex;
+      flex-direction: column;
+    }
+    .carte img {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      background: #e5e9ee;
+      display: block;
+    }
+    .carte .infos { padding: 14px 16px 16px; }
+    .carte h2 { margin: 0 0 8px; font-size: 1.1rem; }
+    .carte p { margin: 4px 0; font-size: .92rem; color: var(--muted); word-break: break-word; }
+    .carte .date { margin-top: 10px; font-size: .8rem; }
+
+    .etat {
+      text-align: center;
+      padding: 32px 16px;
+      color: var(--muted);
+    }
+    .etat.err {
+      background: var(--err-bg);
+      color: var(--err-text);
+      border-radius: 8px;
+    }
+
+    nav.pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+      margin-top: 28px;
+    }
+    nav.pagination button {
+      padding: 10px 16px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 8px;
+      font-size: .95rem;
+      cursor: pointer;
+    }
+    nav.pagination button:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+    nav.pagination button:disabled { opacity: .45; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div class="conteneur">
+    <header>
+      <div>
+        <h1>Liste des inscrits</h1>
+        <div class="compteur" id="compteur"></div>
+      </div>
+      <a class="lien" href="index.html">S'inscrire</a>
+    </header>
+
+    <div id="zone" aria-live="polite"></div>
+
+    <nav class="pagination" id="pagination" hidden>
+      <button type="button" id="prec">← Précédent</button>
+      <span id="info-page"></span>
+      <button type="button" id="suiv">Suivant →</button>
+    </nav>
+  </div>
+
+  <script>
+    // Le navigateur appelle seulement l'API PHP (api/liste.php) ;
+    // les photos sont chargées directement depuis les URL Cloudinary.
+    const LIMITE = 12;
+    const zone = document.getElementById('zone');
+    const compteur = document.getElementById('compteur');
+    const pagination = document.getElementById('pagination');
+    const infoPage = document.getElementById('info-page');
+    const btnPrec = document.getElementById('prec');
+    const btnSuiv = document.getElementById('suiv');
+
+    let pageCourante = 1;
+    let pagesTotal = 1;
+
+    function afficherEtat(texte, erreur = false) {
+      zone.replaceChildren();
+      const div = document.createElement('div');
+      div.className = 'etat' + (erreur ? ' err' : '');
+      div.textContent = texte;
+      zone.appendChild(div);
+    }
+
+    function formaterDate(valeur) {
+      if (!valeur) return '';
+      // MySQL renvoie "YYYY-MM-DD HH:MM:SS"
+      const d = new Date(String(valeur).replace(' ', 'T'));
+      return isNaN(d) ? valeur : d.toLocaleDateString('fr-FR', {
+        day: '2-digit', month: 'long', year: 'numeric'
+      });
+    }
+
+    function ligne(texte) {
+      const p = document.createElement('p');
+      p.textContent = texte;
+      return p;
+    }
+
+    function creerCarte(i) {
+      const carte = document.createElement('article');
+      carte.className = 'carte';
+
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.alt = 'Photo de ' + i.prenom + ' ' + i.nom;
+      // On n'accepte que des URL https (celles de Cloudinary).
+      if (typeof i.photo_url === 'string' && i.photo_url.startsWith('https://')) {
+        img.src = i.photo_url;
+      }
+      img.addEventListener('error', () => { img.removeAttribute('src'); });
+      carte.appendChild(img);
+
+      const infos = document.createElement('div');
+      infos.className = 'infos';
+
+      const titre = document.createElement('h2');
+      titre.textContent = i.prenom + ' ' + i.nom;
+      infos.appendChild(titre);
+
+      infos.appendChild(ligne(i.email));
+      if (i.telephone) infos.appendChild(ligne(i.telephone));
+
+      const date = ligne('Inscrit le ' + formaterDate(i.created_at));
+      date.className = 'date';
+      infos.appendChild(date);
+
+      carte.appendChild(infos);
+      return carte;
+    }
+
+    async function charger(page) {
+      afficherEtat('Chargement…');
+      pagination.hidden = true;
+
+      try {
+        const reponse = await fetch('api/liste.php?page=' + page + '&limite=' + LIMITE, {
+          headers: { 'Accept': 'application/json' }
+        });
+
+        let resultat = {};
+        try { resultat = await reponse.json(); } catch (_) {}
+
+        if (!reponse.ok || !resultat.success) {
+          afficherEtat(resultat.message || 'Erreur lors du chargement (code ' + reponse.status + ').', true);
+          compteur.textContent = '';
+          return;
+        }
+
+        const { data, meta } = resultat;
+        pageCourante = meta.page;
+        pagesTotal = Math.max(1, meta.pages);
+
+        compteur.textContent = meta.total + (meta.total > 1 ? ' inscrits' : ' inscrit');
+
+        if (data.length === 0) {
+          afficherEtat("Aucune inscription pour l'instant.");
+          return;
+        }
+
+        const grille = document.createElement('div');
+        grille.className = 'grille';
+        data.forEach(i => grille.appendChild(creerCarte(i)));
+        zone.replaceChildren(grille);
+
+        infoPage.textContent = 'Page ' + pageCourante + ' / ' + pagesTotal;
+        btnPrec.disabled = pageCourante <= 1;
+        btnSuiv.disabled = pageCourante >= pagesTotal;
+        pagination.hidden = pagesTotal <= 1;
+      } catch (err) {
+        afficherEtat('Impossible de joindre le serveur. Réessayez plus tard.', true);
+        compteur.textContent = '';
+      }
+    }
+
+    btnPrec.addEventListener('click', () => charger(pageCourante - 1));
+    btnSuiv.addEventListener('click', () => charger(pageCourante + 1));
+
+    charger(1);
+  </script>
+</body>
+</html>
