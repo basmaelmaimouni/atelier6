@@ -2,46 +2,31 @@
 declare(strict_types=1);
 
 /**
- * api/inscrire.php
+ * api/inscrire.php  (version adaptée à Vercel)
  *
- * 1. Reçoit les données du formulaire (multipart/form-data : champs + fichier "photo")
- * 2. Vérifie les données et le fichier image
- * 3. Envoie la photo à Cloudinary (upload signé, côté serveur)
- * 4. Récupère l'URL sécurisée (secure_url)
- * 5. Insère les informations dans MySQL (PDO, requêtes préparées)
- * 6. Renvoie une réponse JSON au navigateur
- *
- * Les secrets (MySQL, Cloudinary) restent sur le serveur : ils sont lus dans
- * les variables d'environnement et ne sont jamais envoyés au navigateur.
- *
- * Variables d'environnement attendues :
- *   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS
- *   DB_SSL_CA (chemin du certificat CA d'Aiven, ca.pem)
- *   CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
- *
- * Table MySQL :
- *   CREATE TABLE inscriptions (
- *     id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
- *     nom         VARCHAR(100) NOT NULL,
- *     prenom      VARCHAR(100) NOT NULL,
- *     email       VARCHAR(150) NOT NULL UNIQUE,
- *     telephone   VARCHAR(30)  NULL,
- *     photo_url   VARCHAR(500) NOT NULL,
- *     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
- *   ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+ * Variables d'environnement Vercel acceptées :
+ *   DB_HOST, DB_PORT, DB_NAME, DB_USER
+ *   DB_PASSWORD  (ou DB_PASS)
+ *   DB_SSL_CA    (optionnel) : soit le chemin du ca.pem, soit le CONTENU du certificat
+ *                (-----BEGIN CERTIFICATE----- ...). Sinon, le fichier api/ca.pem est utilisé s'il existe.
+ *   CLOUDINARY_URL  (cloudinary://API_KEY:API_SECRET@CLOUD_NAME)
+ *     ou bien CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
  */
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
-const MAX_PHOTO_OCTETS = 5 * 1024 * 1024; // 5 Mo
-const TYPES_AUTORISES  = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_PHOTO_OCTETS   = 5 * 1024 * 1024; // 5 Mo
+const TYPES_AUTORISES    = ['image/jpeg', 'image/png', 'image/webp'];
 const DOSSIER_CLOUDINARY = 'inscriptions';
 
 function config(string $cle, string $defaut = ''): string
 {
     $valeur = getenv($cle);
-    return ($valeur === false || $valeur === '') ? $defaut : $valeur;
+    if ($valeur === false || $valeur === '') {
+        $valeur = $_ENV[$cle] ?? $_SERVER[$cle] ?? false;
+    }
+    return ($valeur === false || $valeur === '') ? $defaut : (string) $valeur;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,8 +51,25 @@ function erreur(int $code, string $message, array $erreurs = []): never
 }
 
 // ---------------------------------------------------------------------------
-// Cloudinary (upload et suppression signés, via cURL)
+// Cloudinary
 // ---------------------------------------------------------------------------
+function cloudinary_config(): array
+{
+    $url = config('CLOUDINARY_URL');
+    if ($url !== '' && preg_match('#^cloudinary://([^:]+):([^@]+)@(.+)$#', $url, $m)) {
+        return ['cle' => $m[1], 'secret' => $m[2], 'cloud' => $m[3]];
+    }
+    $c = [
+        'cle'    => config('CLOUDINARY_API_KEY'),
+        'secret' => config('CLOUDINARY_API_SECRET'),
+        'cloud'  => config('CLOUDINARY_CLOUD_NAME'),
+    ];
+    if ($c['cle'] === '' || $c['secret'] === '' || $c['cloud'] === '') {
+        throw new RuntimeException('Configuration Cloudinary incomplète.');
+    }
+    return $c;
+}
+
 function cloudinary_signer(array $params, string $secret): string
 {
     ksort($params);
@@ -110,24 +112,18 @@ function cloudinary_appel(string $url, array $champs): array
 
 function cloudinary_envoyer(string $cheminTmp, string $mime, string $nomOriginal): array
 {
-    $cloud  = config('CLOUDINARY_CLOUD_NAME');
-    $cle    = config('CLOUDINARY_API_KEY');
-    $secret = config('CLOUDINARY_API_SECRET');
-    if ($cloud === '' || $cle === '' || $secret === '') {
-        throw new RuntimeException('Configuration Cloudinary incomplète.');
-    }
-
+    $c = cloudinary_config();
     $timestamp = time();
     $signature = cloudinary_signer(
         ['folder' => DOSSIER_CLOUDINARY, 'timestamp' => $timestamp],
-        $secret
+        $c['secret']
     );
 
     return cloudinary_appel(
-        "https://api.cloudinary.com/v1_1/$cloud/image/upload",
+        "https://api.cloudinary.com/v1_1/{$c['cloud']}/image/upload",
         [
             'file'      => new CURLFile($cheminTmp, $mime, $nomOriginal),
-            'api_key'   => $cle,
+            'api_key'   => $c['cle'],
             'timestamp' => $timestamp,
             'folder'    => DOSSIER_CLOUDINARY,
             'signature' => $signature,
@@ -137,21 +133,18 @@ function cloudinary_envoyer(string $cheminTmp, string $mime, string $nomOriginal
 
 function cloudinary_supprimer(string $publicId): void
 {
-    // Nettoyage « au mieux » si l'insertion MySQL échoue après l'upload.
     try {
-        $cloud  = config('CLOUDINARY_CLOUD_NAME');
-        $cle    = config('CLOUDINARY_API_KEY');
-        $secret = config('CLOUDINARY_API_SECRET');
+        $c = cloudinary_config();
         $timestamp = time();
         $signature = cloudinary_signer(
             ['public_id' => $publicId, 'timestamp' => $timestamp],
-            $secret
+            $c['secret']
         );
         cloudinary_appel(
-            "https://api.cloudinary.com/v1_1/$cloud/image/destroy",
+            "https://api.cloudinary.com/v1_1/{$c['cloud']}/image/destroy",
             [
                 'public_id' => $publicId,
-                'api_key'   => $cle,
+                'api_key'   => $c['cle'],
                 'timestamp' => $timestamp,
                 'signature' => $signature,
             ]
@@ -162,8 +155,36 @@ function cloudinary_supprimer(string $publicId): void
 }
 
 // ---------------------------------------------------------------------------
-// MySQL
+// MySQL (Aiven + SSL)
 // ---------------------------------------------------------------------------
+function chemin_certificat_ca(): ?string
+{
+    $ca = config('DB_SSL_CA');
+
+    // 1) Le contenu du certificat est collé directement dans la variable Vercel.
+    if ($ca !== '' && str_contains($ca, 'BEGIN CERTIFICATE')) {
+        $ca = str_replace('\n', "\n", $ca);
+        $tmp = sys_get_temp_dir() . '/aiven-ca.pem';
+        if (!is_file($tmp)) {
+            file_put_contents($tmp, $ca);
+        }
+        return $tmp;
+    }
+
+    // 2) Chemin explicite.
+    if ($ca !== '' && is_file($ca)) {
+        return $ca;
+    }
+
+    // 3) Fichier ca.pem placé à côté de ce script (api/ca.pem).
+    $local = __DIR__ . '/ca.pem';
+    if (is_file($local)) {
+        return $local;
+    }
+
+    return null;
+}
+
 function connexion_bdd(): PDO
 {
     $dsn = sprintf(
@@ -177,16 +198,26 @@ function connexion_bdd(): PDO
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,
+        PDO::ATTR_TIMEOUT            => 10,
     ];
 
-    // Aiven impose une connexion SSL : on vérifie le certificat du serveur avec le CA fourni.
-    $ca = config('DB_SSL_CA');
-    if ($ca !== '') {
+    $ca = chemin_certificat_ca();
+    if ($ca !== null) {
         $options[PDO::MYSQL_ATTR_SSL_CA] = $ca;
         $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
+    } else {
+        // Sans certificat CA : SSL activé mais sans vérification (à éviter en production).
+        $bundle = '/etc/ssl/certs/ca-certificates.crt';
+        $options[PDO::MYSQL_ATTR_SSL_CA] = is_file($bundle) ? $bundle : '/dev/null';
+        $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
     }
 
-    return new PDO($dsn, config('DB_USER'), config('DB_PASS'), $options);
+    $mdp = config('DB_PASSWORD', config('DB_PASS'));
+    if ($mdp === '') {
+        throw new RuntimeException('Mot de passe MySQL manquant (variable DB_PASSWORD).');
+    }
+
+    return new PDO($dsn, config('DB_USER'), $mdp, $options);
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +253,7 @@ try {
 
     // --- 2bis. Vérification du fichier image --------------------------------
     $photo = $_FILES['photo'] ?? null;
+    $mime  = '';
 
     if ($photo === null || ($photo['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
         $erreurs['photo'] = 'La photo est obligatoire.';
@@ -231,12 +263,12 @@ try {
             UPLOAD_ERR_PARTIAL                        => "La photo n'a été que partiellement envoyée.",
             default                                   => "Échec de l'envoi de la photo.",
         };
-    } elseif (!is_uploaded_file($photo['tmp_name'])) {
+    } elseif (!is_file($photo['tmp_name'])) {
+        // is_uploaded_file() peut échouer derrière le serveur intégré / Vercel : on vérifie l'existence.
         $erreurs['photo'] = 'Fichier non valide.';
     } elseif ($photo['size'] > MAX_PHOTO_OCTETS) {
         $erreurs['photo'] = 'La photo ne doit pas dépasser 5 Mo.';
     } else {
-        // Le type est détecté d'après le contenu réel, pas d'après le nom ou le type déclaré.
         $finfo = new finfo(FILEINFO_MIME_TYPE);
         $mime  = (string) $finfo->file($photo['tmp_name']);
         if (!in_array($mime, TYPES_AUTORISES, true) || @getimagesize($photo['tmp_name']) === false) {
@@ -248,7 +280,7 @@ try {
         erreur(422, implode(' ', $erreurs), $erreurs);
     }
 
-    // --- Connexion MySQL + contrôle de doublon (avant d'envoyer la photo) ----
+    // --- Connexion MySQL + contrôle de doublon ------------------------------
     $pdo = connexion_bdd();
 
     $existe = $pdo->prepare('SELECT 1 FROM inscriptions WHERE email = :email LIMIT 1');
@@ -282,11 +314,10 @@ try {
         ]);
         $id = (int) $pdo->lastInsertId();
     } catch (PDOException $e) {
-        // L'insertion a échoué : on retire la photo pour ne pas laisser de fichier orphelin.
         if ($publicId !== '') {
             cloudinary_supprimer($publicId);
         }
-        if (($e->errorInfo[1] ?? 0) === 1062) { // doublon (course entre deux requêtes)
+        if (($e->errorInfo[1] ?? 0) === 1062) {
             erreur(409, 'Cette adresse e-mail est déjà inscrite.', ['email' => 'Déjà inscrite.']);
         }
         throw $e;
@@ -305,7 +336,6 @@ try {
         ],
     ]);
 } catch (Throwable $e) {
-    // Le détail technique reste dans les logs serveur, jamais dans la réponse.
     error_log('[inscrire.php] ' . $e::class . ' : ' . $e->getMessage());
     erreur(500, "Une erreur interne est survenue. Réessayez plus tard.");
 }
