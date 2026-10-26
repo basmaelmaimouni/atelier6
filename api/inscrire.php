@@ -1,5 +1,6 @@
-
 <?php
+
+ob_start();
 
 // PHP warnings must never be mixed into the JSON response body.
 ini_set('display_errors', '0');
