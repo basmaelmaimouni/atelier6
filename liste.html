@@ -165,8 +165,8 @@
       img.loading = 'lazy';
       img.alt = 'Photo de ' + i.prenom + ' ' + i.nom;
       // On n'accepte que des URL https (celles de Cloudinary).
-      if (typeof i.photo_url === 'string' && i.photo_url.startsWith('https://')) {
-        img.src = i.photo_url;
+      if (typeof i.photo === 'string' && i.photo.startsWith('https://')) {
+        img.src = i.photo;
       }
       img.addEventListener('error', () => { img.removeAttribute('src'); });
       carte.appendChild(img);
@@ -178,10 +178,9 @@
       titre.textContent = i.prenom + ' ' + i.nom;
       infos.appendChild(titre);
 
-      infos.appendChild(ligne(i.email));
-      if (i.telephone) infos.appendChild(ligne(i.telephone));
+      infos.appendChild(ligne('Ville : ' + i.ville));
 
-      const date = ligne('Inscrit le ' + formaterDate(i.created_at));
+      const date = ligne('Inscrit le ' + formaterDate(i.date_inscription));
       date.className = 'date';
       infos.appendChild(date);
 
@@ -198,20 +197,20 @@
           headers: { 'Accept': 'application/json' }
         });
 
-        let resultat = {};
+        let resultat = null;
         try { resultat = await reponse.json(); } catch (_) {}
 
-        if (!reponse.ok || !resultat.success) {
-          afficherEtat(resultat.message || 'Erreur lors du chargement (code ' + reponse.status + ').', true);
+        if (!reponse.ok || !Array.isArray(resultat)) {
+          afficherEtat(resultat?.message || 'Erreur lors du chargement (code ' + reponse.status + ').', true);
           compteur.textContent = '';
           return;
         }
 
-        const { data, meta } = resultat;
-        pageCourante = meta.page;
-        pagesTotal = Math.max(1, meta.pages);
+        const data = resultat;
+        pageCourante = 1;
+        pagesTotal = 1;
 
-        compteur.textContent = meta.total + (meta.total > 1 ? ' inscrits' : ' inscrit');
+        compteur.textContent = data.length + (data.length > 1 ? ' inscrits' : ' inscrit');
 
         if (data.length === 0) {
           afficherEtat("Aucune inscription pour l'instant.");
@@ -223,10 +222,7 @@
         data.forEach(i => grille.appendChild(creerCarte(i)));
         zone.replaceChildren(grille);
 
-        infoPage.textContent = 'Page ' + pageCourante + ' / ' + pagesTotal;
-        btnPrec.disabled = pageCourante <= 1;
-        btnSuiv.disabled = pageCourante >= pagesTotal;
-        pagination.hidden = pagesTotal <= 1;
+        pagination.hidden = true;
       } catch (err) {
         afficherEtat('Impossible de joindre le serveur. Réessayez plus tard.', true);
         compteur.textContent = '';
