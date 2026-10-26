@@ -73,6 +73,15 @@
     }
     #message.ok { display: block; background: var(--ok-bg); color: var(--ok-text); }
     #message.err { display: block; background: var(--err-bg); color: var(--err-text); }
+    #lien-liste {
+      display: none;
+      margin-top: 12px;
+      color: var(--primary);
+      font-weight: 600;
+      text-decoration: none;
+    }
+    #lien-liste.visible { display: inline-block; }
+    #lien-liste:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -100,6 +109,7 @@
     </form>
 
     <div id="message" role="status" aria-live="polite"></div>
+    <a id="lien-liste" href="liste.html">Afficher la liste des stagiaires</a>
   </main>
 
   <script>
@@ -107,6 +117,7 @@
     const form = document.getElementById('form-inscription');
     const btn = document.getElementById('btn');
     const message = document.getElementById('message');
+    const lienListe = document.getElementById('lien-liste');
 
     function afficher(texte, type) {
       message.textContent = texte;
@@ -117,6 +128,7 @@
       e.preventDefault();
       message.className = '';
       message.textContent = '';
+      lienListe.classList.remove('visible');
 
       if (!form.checkValidity()) {
         form.reportValidity();
@@ -157,6 +169,7 @@
         if (reponse.ok) {
           afficher(resultat.message || 'Inscription enregistrée. Merci !', 'ok');
           form.reset();
+          lienListe.classList.add('visible');
         } else {
           afficher(resultat.message || resultat.erreur || 'Une erreur est survenue (code ' + reponse.status + ').', 'err');
         }
