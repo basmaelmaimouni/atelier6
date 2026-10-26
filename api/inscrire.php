@@ -15,7 +15,7 @@ declare(strict_types=1);
  * les variables d'environnement et ne sont jamais envoyés au navigateur.
  *
  * Variables d'environnement attendues :
- *   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS
+ *   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD (ou DB_PASS)
  *   DB_SSL_CA (chemin du certificat CA d'Aiven, ca.pem)
  *   CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
  *
@@ -181,12 +181,15 @@ function connexion_bdd(): PDO
 
     // Aiven impose une connexion SSL : on vérifie le certificat du serveur avec le CA fourni.
     $ca = config('DB_SSL_CA');
-    if ($ca !== '') {
+    if ($ca === '') {
+        $ca = dirname(__DIR__) . '/certs/ca.pem';
+    }
+    if (is_file($ca)) {
         $options[PDO::MYSQL_ATTR_SSL_CA] = $ca;
         $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
     }
 
-    return new PDO($dsn, config('DB_USER'), config('DB_PASS'), $options);
+    return new PDO($dsn, config('DB_USER'), config('DB_PASSWORD', config('DB_PASS')), $options);
 }
 
 // ---------------------------------------------------------------------------

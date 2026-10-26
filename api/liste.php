@@ -14,7 +14,7 @@ declare(strict_types=1);
  * Exemple : api/liste.php?page=2&limite=10
  *
  * Variables d'environnement attendues (valeurs fournies par la console Aiven) :
- *   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS
+ *   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD (ou DB_PASS)
  *   DB_SSL_CA   chemin du certificat CA d'Aiven (ca.pem) — Aiven impose une connexion SSL
  */
 
@@ -53,12 +53,15 @@ function connexion_bdd(): PDO
 
     // Connexion chiffrée vers Aiven : on vérifie le certificat du serveur avec le CA fourni.
     $ca = config('DB_SSL_CA');
-    if ($ca !== '') {
+    if ($ca === '') {
+        $ca = dirname(__DIR__) . '/certs/ca.pem';
+    }
+    if (is_file($ca)) {
         $options[PDO::MYSQL_ATTR_SSL_CA] = $ca;
         $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = true;
     }
 
-    return new PDO($dsn, config('DB_USER'), config('DB_PASS'), $options);
+    return new PDO($dsn, config('DB_USER'), config('DB_PASSWORD', config('DB_PASS')), $options);
 }
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {
